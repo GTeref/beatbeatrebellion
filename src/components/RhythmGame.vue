@@ -161,7 +161,8 @@
               calculateVolumeForRange(dataArray, 300, 800),    // Mid (Lane 2)
               calculateVolumeForRange(dataArray, 800, 2000)    // High (Lane 3)
             ];
-            
+
+          
             // Find the highest volume and generate a note if it's above threshold
             const maxVolume = Math.max(...laneVolumes);
             const threshold = 130; // Adjust based on testing
