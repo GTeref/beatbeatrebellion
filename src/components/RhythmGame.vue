@@ -97,13 +97,16 @@
         
         // Read file as ArrayBuffer
         const arrayBuffer = await audioFile.value.arrayBuffer();
+
+        const dupArrayBuffer=arrayBuffer.slice(0);
         
         // Decode audio data
-        audioBuffer.value = await audioContext.value.decodeAudioData(arrayBuffer);
+        audioBuffer.value = await audioContext.value.decodeAudioData(dupArrayBuffer);
 
         const audioBytes=new Uint8Array(arrayBuffer);
 
         try{
+          console.log(`Generating beatmap for audio file: ${audioFile.value.name}`);
           const beatmap=await invoke<number[][]>('analyze_audio', {
             audioData: Array.from(audioBytes)
           });
@@ -135,15 +138,21 @@
         audioSource.value.buffer = audioBuffer.value;
         
         // Connect nodes
-        audioSource.value.connect(analyser.value!);
-        analyser.value!.connect(audioContext.value.destination);
+        if (analyser.value){
+          audioSource.value.connect(analyser.value!);
+          analyser.value!.connect(audioContext.value.destination);
+        } else {
+          audioSource.value.connect(audioContext.value.destination);
+        }
+        
         
         // Start audio
         audioSource.value.start(0);
         isPlaying.value = true;
         
         // Start game loop
-        lastNoteTime = Date.now();
+        // lastNoteTime = Date.now();
+        lastBeatTime.value = audioContext.value.currentTime;
         gameLoop();
       };
       
@@ -166,6 +175,11 @@
       };
       
       const gameLoop = () => {
+        console.log('Game loop running', { 
+          isPlaying: isPlaying.value, 
+          beatmapLength: generatedBeatmap.value.length,
+          currentIndex: beatmapIndex.value 
+        });
         // Analyze audio and generate notes
         if (isPlaying.value && generatedBeatmap.value.length > 0) {
           // Calculate timing based on audio playback
@@ -173,8 +187,8 @@
           
           // Check if we should generate the next note
           if (beatmapIndex.value < generatedBeatmap.value.length) {
-            // Use frametime to pace notes (adjust 0.05 to change pace)
-            if (currentTime - lastBeatTime.value > 0.05) {
+            // Use frametime to pace notes
+            if (currentTime - lastBeatTime.value > 0.1) {
               const bandEnergies = generatedBeatmap.value[beatmapIndex.value];
               
               // Find the dominant band
@@ -189,8 +203,9 @@
               }
               
               // Generate note if energy exceeds threshold
-              if (maxEnergy > 1.0) { // Adjust threshold as needed
+              if (maxEnergy > 0.1) {
                 generateNote(maxBand);
+                console.log(`Generated note in lane ${maxBand} with energy ${maxEnergy}`);
               }
               
               beatmapIndex.value++;
@@ -201,8 +216,10 @@
           // Update notes positions
           updateNotes();
         }
+        if (isPlaying.value){
+          animationFrameId = requestAnimationFrame(gameLoop);
+        }
         
-        animationFrameId = requestAnimationFrame(gameLoop);
       };
       
       const calculateVolumeForRange = (dataArray: Uint8Array, startFreq: number, endFreq: number): number => {
