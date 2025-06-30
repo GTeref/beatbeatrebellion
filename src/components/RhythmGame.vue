@@ -49,6 +49,7 @@
   
   <script lang="ts">
   import { defineComponent, ref, reactive, onMounted, onBeforeUnmount } from 'vue';
+  import { invoke } from '@tauri-apps/api/core';
   
   export default defineComponent({
     name: 'RhythmGame',
@@ -63,6 +64,9 @@
       const score = ref(0);
       const activeNotes = ref<any[]>([]);
       const noteId = ref(0);
+      const generatedBeatmap = ref<number[][]>([]);
+      const beatmapIndex = ref(0);
+      const lastBeatTime = ref(0);
       
       // Define lanes (A, S, K, L keys)
       const lanes = reactive([
@@ -96,8 +100,25 @@
         
         // Decode audio data
         audioBuffer.value = await audioContext.value.decodeAudioData(arrayBuffer);
+
+        const audioBytes=new Uint8Array(arrayBuffer);
+
+        try{
+          const beatmap=await invoke<number[][]>('analyze_audio', {
+            audioData: Array.from(audioBytes)
+          });
+
+          generatedBeatmap.value = beatmap;
+          beatmapIndex.value=0;
+
+          console.log(`generated beatmap w/ ${beatmap.length} notes`);
+        } catch (error) {
+          console.error('Error generating beatmap:', error);
+          // generatedBeatmap.value = [];
+        }
+
         
-        // Create analyser node
+        //Create analyser node
         analyser.value = audioContext.value.createAnalyser();
         analyser.value.fftSize = 2048;
       };
@@ -146,31 +167,34 @@
       
       const gameLoop = () => {
         // Analyze audio and generate notes
-        if (isPlaying.value && analyser.value) {
-          const bufferLength = analyser.value.frequencyBinCount;
-          const dataArray = new Uint8Array(bufferLength);
-          analyser.value.getByteFrequencyData(dataArray);
+        if (isPlaying.value && generatedBeatmap.value.length > 0) {
+          // Calculate timing based on audio playback
+          const currentTime = audioContext.value?.currentTime || 0;
           
-          // Simple peak detection (can be improved)
-          const currentTime = Date.now();
-          if (currentTime - lastNoteTime > 500) { // Limit note generation rate
-            // Calculate average volume across frequency ranges for each lane
-            const laneVolumes = [
-              calculateVolumeForRange(dataArray, 0, 100),      // Bass (Lane 0)
-              calculateVolumeForRange(dataArray, 100, 300),    // Low-mid (Lane 1)
-              calculateVolumeForRange(dataArray, 300, 800),    // Mid (Lane 2)
-              calculateVolumeForRange(dataArray, 800, 2000)    // High (Lane 3)
-            ];
-
-          
-            // Find the highest volume and generate a note if it's above threshold
-            const maxVolume = Math.max(...laneVolumes);
-            const threshold = 130; // Adjust based on testing
-            
-            if (maxVolume > threshold) {
-              const laneIndex = laneVolumes.indexOf(maxVolume);
-              generateNote(laneIndex);
-              lastNoteTime = currentTime;
+          // Check if we should generate the next note
+          if (beatmapIndex.value < generatedBeatmap.value.length) {
+            // Use frametime to pace notes (adjust 0.05 to change pace)
+            if (currentTime - lastBeatTime.value > 0.05) {
+              const bandEnergies = generatedBeatmap.value[beatmapIndex.value];
+              
+              // Find the dominant band
+              let maxEnergy = 0;
+              let maxBand = 0;
+              
+              for (let i = 0; i < bandEnergies.length; i++) {
+                if (bandEnergies[i] > maxEnergy) {
+                  maxEnergy = bandEnergies[i];
+                  maxBand = i;
+                }
+              }
+              
+              // Generate note if energy exceeds threshold
+              if (maxEnergy > 1.0) { // Adjust threshold as needed
+                generateNote(maxBand);
+              }
+              
+              beatmapIndex.value++;
+              lastBeatTime.value = currentTime;
             }
           }
           
