@@ -31,10 +31,16 @@
             v-for="note in activeNotes" 
             :key="note.id" 
             class="note" 
-            :class="{ 'hit': note.hit }"
+            :class="{
+               'hit': note.hit,
+               'holding': note.isHolding,
+                'single': note.type === 'single',
+                'hold': note.type === 'hold'
+            }"
             :style="{ 
               top: `${note.position}px`, 
-              left: `${(note.lane * 25) + 12.5}%` 
+              left: `${(note.lane * 25) + 12.5}%`,
+              height: note.type === 'hold' ? `${note.duration || 0}px` : '40px',
             }">
           </div>
         </div>
@@ -64,9 +70,21 @@
       const score = ref(0);
       const activeNotes = ref<any[]>([]);
       const noteId = ref(0);
-      const generatedBeatmap = ref<number[][]>([]);
+      const generatedBeatmap = ref<any[]>([]);
       const beatmapIndex = ref(0);
       const lastBeatTime = ref(0);
+      const heldKeys=ref<Set<string>>(new Set());
+
+      interface Note {
+        id: number;
+        lane: number;
+        position: number;
+        hit: boolean;
+        type: 'single' | 'hold';
+        duration?: number; // For hold notes
+        holdProgress?: number; // For hold notes
+        isHolding?: boolean; // For hold notes
+      }
       
       // Define lanes (A, S, K, L keys)
       const lanes = reactive([
@@ -136,6 +154,13 @@
         // Create source node
         audioSource.value = audioContext.value.createBufferSource();
         audioSource.value.buffer = audioBuffer.value;
+
+        //listen for audio end
+        audioSource.value.onended = () => {
+          isPlaying.value = false;
+          cancelAnimationFrame(animationFrameId);
+          console.log('Audio playback ended');
+        };
         
         // Connect nodes
         if (analyser.value){
@@ -186,30 +211,18 @@
           const currentTime = audioContext.value?.currentTime || 0;
           
           // Check if we should generate the next note
-          if (beatmapIndex.value < generatedBeatmap.value.length) {
-            // Use frametime to pace notes
-            if (currentTime - lastBeatTime.value > 0.1) {
-              const bandEnergies = generatedBeatmap.value[beatmapIndex.value];
-              
-              // Find the dominant band
-              let maxEnergy = 0;
-              let maxBand = 0;
-              
-              for (let i = 0; i < bandEnergies.length; i++) {
-                if (bandEnergies[i] > maxEnergy) {
-                  maxEnergy = bandEnergies[i];
-                  maxBand = i;
-                }
-              }
-              
-              // Generate note if energy exceeds threshold
-              if (maxEnergy > 0.1) {
-                generateNote(maxBand);
-                console.log(`Generated note in lane ${maxBand} with energy ${maxEnergy}`);
-              }
-              
+          while (beatmapIndex.value < generatedBeatmap.value.length) {
+            const nextNote=generatedBeatmap.value[beatmapIndex.value];
+
+            const noteSpawnTime=nextNote.timestamp-2.0;
+
+            if (currentTime >= noteSpawnTime) {
+
+              const duration=nextNote.note_type === 'hold' ? nextNote.duration*60 : 0;
+              generateNote(nextNote.lane, nextNote.note_type, duration);
               beatmapIndex.value++;
-              lastBeatTime.value = currentTime;
+            } else {
+              break; // No more notes to generate at this time
             }
           }
           
@@ -234,13 +247,26 @@
         return sum / (endIndex - startIndex + 1);
       };
       
-      const generateNote = (laneIndex: number) => {
-        activeNotes.value.push({
+      const generateNote = (laneIndex: number, noteType: 'single' | 'hold' = 'single', duration: number=0) => {
+        // activeNotes.value.push({
+        //   id: noteId.value++,
+        //   lane: laneIndex,
+        //   position: 0,
+        //   hit: false
+        // });
+        const note: Note = {
           id: noteId.value++,
           lane: laneIndex,
           position: 0,
-          hit: false
-        });
+          hit: false,
+          type: noteType,
+          duration: noteType === 'hold' ? duration : 0,
+          holdProgress: 0,
+          isHolding: false
+        };
+
+        activeNotes.value.push(note);
+        console.log(`Generated ${noteType} note in lane ${laneIndex}${noteType === 'hold' ? ` (duration: ${duration}px)` : ''}`);
       };
       
       const updateNotes = () => {
@@ -253,6 +279,24 @@
         activeNotes.value.forEach(note => {
           if (!note.hit) {
             note.position += 3; // Adjust speed as needed
+
+            //hold note logic
+            if (note.type === 'hold' && note.isHolding) {
+              const noteEnd=note.position + (note.duration || 0);
+
+              if (Math.abs(noteEnd - hitLinePosition) < hitThreshold ||
+                  Math.abs(note.position - hitLinePosition) < hitThreshold ||
+                  (note.position < hitLinePosition && noteEnd > hitLinePosition)) {
+                note.holdProgress = Math.min((note.holdProgress || 0) + 2, note.duration || 0);
+                score.value += 2; // Increment score for holding
+
+                if (note.holdProgress >= (note.duration || 0)) {
+                  note.hit = true; // Mark as hit when hold is complete
+                  // note.isHolding = false; // Stop holding
+                  score.value += 100; // Bonus for completing hold
+                }
+              }
+            }
           }
         });
         
@@ -275,6 +319,7 @@
         
         if (laneIndex !== -1) {
           lanes[laneIndex].active = true;
+          heldKeys.value.add(key);
           
           // Check if there's a note to hit
           if (!gameArea.value) return;
@@ -290,8 +335,14 @@
           });
           
           if (noteToHit) {
-            noteToHit.hit = true;
-            score.value += 100;
+            if (noteToHit.type=='single') {
+              noteToHit.hit = true;
+              score.value += 100;
+            } else if (noteToHit.type=='hold') {
+              noteToHit.isHolding = true;
+              score.value += 50; // Initial score for hold notes
+            }
+            
           }
         }
       };
@@ -302,6 +353,14 @@
         
         if (laneIndex !== -1) {
           lanes[laneIndex].active = false;
+          heldKeys.value.delete(key);
+
+          activeNotes.value.forEach(note=>{
+            if (note.lane===laneIndex && note.type==='hold' && note.isHolding) {
+              note.isHolding = false;
+              // score.value += 100; // Bonus for holding
+            }
+          })
         }
       };
       
@@ -421,20 +480,48 @@
     background-color: #ff5555;
     z-index: 4;
   }
-  
+
   .note {
     position: absolute;
     width: 40px;
-    height: 40px;
     background-color: #5555ff;
-    border-radius: 50%;
+    border-radius: 20px;
     transform: translateX(-50%);
     z-index: 3;
+    transition: background-color 0.1s ease;
   }
-  
+
+  .note.single {
+    height: 40px;
+    border-radius: 50%;
+  }
+
+  .note.hold {
+    border-radius: 20px 20px 8px 8px;
+    background: linear-gradient(180deg, #5555ff 0%, #3333dd 100%);
+    border: 2px solid #7777ff;
+    min-height: 40px;
+  }
+
+  .note.hold::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 8px;
+    background: linear-gradient(180deg, #3333dd 0%, #1111bb 100%);
+    border-radius: 0 0 4px 4px;
+  }
+
   .note.hit {
     background-color: #55ff55;
-    opacity: 0.5;
+    opacity: 0.8;
+  }
+
+  .note.holding {
+    background-color: #ffff55;
+    box-shadow: 0 0 10px #ffff55;
   }
   
   .audio-controls {
