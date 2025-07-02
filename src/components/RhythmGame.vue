@@ -294,6 +294,7 @@
                   note.hit = true; // Mark as hit when hold is complete
                   // note.isHolding = false; // Stop holding
                   score.value += 100; // Bonus for completing hold
+                  generateHoldCompleteSound(note.lane);
                 }
               }
             }
@@ -335,6 +336,7 @@
           });
           
           if (noteToHit) {
+            generateHitSound(laneIndex, noteToHit.type);
             if (noteToHit.type=='single') {
               noteToHit.hit = true;
               score.value += 100;
@@ -343,6 +345,8 @@
               score.value += 50; // Initial score for hold notes
             }
             
+          } else {
+            generateMissSound(laneIndex);
           }
         }
       };
@@ -361,6 +365,90 @@
               // score.value += 100; // Bonus for holding
             }
           })
+        }
+      };
+
+      // sound generation logic below
+      const generateHitSound = (laneIndex: number, noteType: 'single' | 'hold') => {
+        if (!audioContext.value) return;
+        
+        const frequencies=[220,277,349,440] // A3, C#4, F4, A4
+        const frequency = frequencies[laneIndex];
+
+        const oscillator = audioContext.value.createOscillator();
+        const gainNode = audioContext.value.createGain();
+
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.value.destination);
+
+        if (noteType==='single'){
+          oscillator.type='sine'
+          oscillator.frequency.setValueAtTime(frequency, audioContext.value.currentTime);
+
+          gainNode.gain.setValueAtTime(0, audioContext.value.currentTime);
+          gainNode.gain.linearRampToValueAtTime(0.3, audioContext.value.currentTime + 0.01); // Fade out quickly
+          gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.value.currentTime + 0.15); // Ensure it goes to zero
+
+          oscillator.start(audioContext.value.currentTime); 
+          oscillator.stop(audioContext.value.currentTime + 0.15); // Short sound duration
+        } else {
+          oscillator.type='sawtooth'
+          oscillator.frequency.setValueAtTime(frequency, audioContext.value.currentTime);
+
+          gainNode.gain.setValueAtTime(0, audioContext.value.currentTime);
+          gainNode.gain.linearRampToValueAtTime(0.2, audioContext.value.currentTime + 0.05); // Fade in quickly
+          gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.value.currentTime + 0.3); // Ensure it goes to zero
+
+          oscillator.start(audioContext.value.currentTime);
+          oscillator.stop(audioContext.value.currentTime + 0.3); // Longer sound duration for hold notes
+
+        }
+      };
+
+      const generateMissSound = (laneIndex: number) => {
+        if (!audioContext.value) return;
+
+        const oscillator = audioContext.value.createOscillator();
+        const gainNode = audioContext.value.createGain();
+
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.value.destination);
+
+        oscillator.type='triangle';
+        oscillator.frequency.setValueAtTime(100+(laneIndex*20), audioContext.value.currentTime);
+
+        gainNode.gain.setValueAtTime(0, audioContext.value.currentTime);
+        gainNode.gain.linearRampToValueAtTime(0.1, audioContext.value.currentTime + 0.01); // Fade out quickly
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.value.currentTime + 0.1); // Ensure it goes to zero
+
+        oscillator.start(audioContext.value.currentTime);
+        oscillator.stop(audioContext.value.currentTime + 0.1); // Short sound duration
+      };
+
+       // completion sound for hold notes
+      const generateHoldCompleteSound = (laneIndex: number) => {
+        if (!audioContext.value) return;
+
+        const frequencies = [220, 277, 349, 440];
+        const baseFreq = frequencies[laneIndex];
+
+        // Create a chord for completion
+        for (let i = 0; i < 3; i++) {
+          const oscillator = audioContext.value.createOscillator();
+          const gainNode = audioContext.value.createGain();
+
+          oscillator.connect(gainNode);
+          gainNode.connect(audioContext.value.destination);
+
+          oscillator.type = 'sine';
+          oscillator.frequency.setValueAtTime(baseFreq * (1 + i * 0.25), audioContext.value.currentTime);
+          
+          gainNode.gain.setValueAtTime(0, audioContext.value.currentTime);
+          gainNode.gain.linearRampToValueAtTime(0.15, audioContext.value.currentTime + 0.02);
+          gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.value.currentTime + 0.4);
+          
+          oscillator.start(audioContext.value.currentTime);
+          oscillator.stop(audioContext.value.currentTime + 0.4);
         }
       };
       

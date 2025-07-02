@@ -124,9 +124,9 @@ fn analyze_audio(audio_data: Vec<u8>)->Result<Vec<BeatmapNote>, String> {
 fn determine_note_type(energies: &[f32], band_idx: usize, samples: &[f32], start_pos:usize, sample_rate:usize, hsize:usize ) -> (String, f32) {
     let curr_energy=energies[band_idx];
 
-    let lookahead_chunks=6; //look ahead for 0.n secs
+    let lookahead_chunks=8; //look ahead for 0.n secs
     let mut sustained_energy=0;
-    let min_hold_threshold=curr_energy*0.8;
+    let min_hold_threshold=curr_energy*0.6;
 
     for i in 1..=lookahead_chunks {
         let future_pos=start_pos + (i * hsize);
@@ -145,9 +145,9 @@ fn determine_note_type(energies: &[f32], band_idx: usize, samples: &[f32], start
     }
 
     //if energy is sustained for more than half of lookahead period, it's a hold note
-    if sustained_energy>= (lookahead_chunks * 3)/4 {
+    if sustained_energy >= lookahead_chunks / 2 {
         let duration = (sustained_energy as f32 * hsize as f32) / sample_rate as f32; // duration in seconds
-        return ("hold".to_string(), duration.max(0.3).min(2.0)); // add min hold duration?
+        return ("hold".to_string(), duration.max(0.3).min(1.5)); // add min hold duration?
     } else {
         return ("single".to_string(), 0.0); // single note, no duration
     }
@@ -163,7 +163,7 @@ fn post_process_beatmap(mut beatmap: Vec<BeatmapNote>) -> Vec<BeatmapNote> {
         let curr=&beatmap[i];
         let mut cluster_end=i;
 
-        let cluster_window=0.08;
+        let cluster_window=0.12;
 
         while cluster_end + 1 < beatmap.len() {
             let next=&beatmap[cluster_end + 1];
@@ -174,8 +174,8 @@ fn post_process_beatmap(mut beatmap: Vec<BeatmapNote>) -> Vec<BeatmapNote> {
             }
         }
 
-        // found cluster of 3, convert to hold note
-        if cluster_end>i + 1{
+        // found cluster of 2, convert to hold note
+        if cluster_end>i {
             let duration=beatmap[cluster_end].timestamp - curr.timestamp + 0.1;
             processed.push(BeatmapNote {
                 timestamp: curr.timestamp,
@@ -201,7 +201,7 @@ fn post_process_beatmap(mut beatmap: Vec<BeatmapNote>) -> Vec<BeatmapNote> {
     }
     // remove notes too close to each other
     let mut final_processed : Vec<BeatmapNote>= Vec::new();
-    let min_global_gap=0.05;
+    let min_global_gap=0.03;
 
     for note in processed {
         if let Some(last_note)=final_processed.last() {
