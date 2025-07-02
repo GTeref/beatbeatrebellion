@@ -214,11 +214,11 @@
           while (beatmapIndex.value < generatedBeatmap.value.length) {
             const nextNote=generatedBeatmap.value[beatmapIndex.value];
 
-            const noteSpawnTime=nextNote.timestamp-2.0;
+            const noteSpawnTime=nextNote.timestamp-3.0;
 
             if (currentTime >= noteSpawnTime) {
 
-              const duration=nextNote.note_type === 'hold' ? nextNote.duration*60 : 0;
+              const duration=nextNote.note_type === 'hold' ? nextNote.duration*100 : 0;
               generateNote(nextNote.lane, nextNote.note_type, duration);
               beatmapIndex.value++;
             } else {
