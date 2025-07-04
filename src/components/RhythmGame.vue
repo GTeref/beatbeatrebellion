@@ -7,11 +7,36 @@
         <p>Upload a music file to start playing!</p>
         <input type="file" accept="audio/*" @change="handleFileUpload" />
       </div>
+
+      <!--loading screen-->
+      <div v-else-if="isLoadingBeatmap" class="loading-section">
+        <div class="loading-content">
+          <div class="loading-spinner"></div>
+          <h3>Analyzing Audio...</h3>
+          <p>Generating beatmap for: {{ audioFile?.name }}</p>
+          <div class="loading-progress">
+            <div class="progress-bar">
+              <div class="progress-fill" :style="{ width: `${loadingProgress}%` }"></div>
+            </div>
+            <span class="progress-text">{{ loadingProgress }}%</span>
+          </div>
+        </div>
+      </div>
       
       <!-- Game section -->
-      <div v-else class="game-section">
+      <div v-else-if="audioFile && !isLoadingBeatmap" class="game-section">
         <div class="game-header">
           <div class="score">Score: {{ score }}</div>
+          <div class="autoplay-toggle">
+            <label>
+              <input 
+                type="checkbox" 
+                v-model="autoplay" 
+                :disabled="isPlaying"
+              /> 
+              Autoplay
+            </label>
+          </div>
           <button @click="resetGame" class="reset-btn">Reset</button>
         </div>
         
@@ -74,6 +99,9 @@
       const beatmapIndex = ref(0);
       const lastBeatTime = ref(0);
       const heldKeys=ref<Set<string>>(new Set());
+      const autoplay = ref(false); // Autoplay toggle
+      const isLoadingBeatmap = ref(false);
+      const loadingProgress = ref(0); // Progress for beatmap generation
 
       interface Note {
         id: number;
@@ -109,33 +137,61 @@
       
       const loadAudio = async () => {
         if (!audioFile.value) return;
-        
-        // Create audio context
-        audioContext.value = new (window.AudioContext || (window as any).webkitAudioContext)();
-        
-        // Read file as ArrayBuffer
-        const arrayBuffer = await audioFile.value.arrayBuffer();
 
-        const dupArrayBuffer=arrayBuffer.slice(0);
-        
-        // Decode audio data
-        audioBuffer.value = await audioContext.value.decodeAudioData(dupArrayBuffer);
+        try {
 
-        const audioBytes=new Uint8Array(arrayBuffer);
+          //start loading
+          isLoadingBeatmap.value = true;
+          loadingProgress.value = 0;
 
-        try{
+          //placebo progress updating
+
+          // Create audio context
+          audioContext.value = new (window.AudioContext || (window as any).webkitAudioContext)();
+          loadingProgress.value = 10;
+          
+          // Read file as ArrayBuffer
+          const arrayBuffer = await audioFile.value.arrayBuffer();
+          loadingProgress.value = 20;
+
+          const dupArrayBuffer=arrayBuffer.slice(0);
+          loadingProgress.value = 30;
+
+          // Decode audio data
+          audioBuffer.value = await audioContext.value.decodeAudioData(dupArrayBuffer);
+          loadingProgress.value = 40;
+
+          const audioBytes=new Uint8Array(arrayBuffer);
+          loadingProgress.value = 50;
+
           console.log(`Generating beatmap for audio file: ${audioFile.value.name}`);
-          const beatmap=await invoke<number[][]>('analyze_audio', {
+
+          const progressInterval = setInterval(() => {
+            if (loadingProgress.value < 90) {
+              loadingProgress.value += Math.random() * 5;
+            }
+          }, 200);
+
+          const beatmapPromise=await invoke<number[][]>('analyze_audio', {
             audioData: Array.from(audioBytes)
           });
 
+          const beatmap=await beatmapPromise;
+          clearInterval(progressInterval);
+
           generatedBeatmap.value = beatmap;
           beatmapIndex.value=0;
+          loadingProgress.value = 100;
+          
 
           console.log(`generated beatmap w/ ${beatmap.length} notes`);
+          
         } catch (error) {
           console.error('Error generating beatmap:', error);
           // generatedBeatmap.value = [];
+        } finally {
+          isLoadingBeatmap.value = false;
+          loadingProgress.value = 0;
         }
 
         
@@ -197,6 +253,8 @@
         audioBuffer.value = null;
         activeNotes.value = [];
         score.value = 0;
+        isLoadingBeatmap.value = false;
+        loadingProgress.value = 0;
       };
       
       const gameLoop = () => {
@@ -235,18 +293,6 @@
         
       };
       
-      const calculateVolumeForRange = (dataArray: Uint8Array, startFreq: number, endFreq: number): number => {
-        const startIndex = Math.floor(startFreq / 22050 * dataArray.length);
-        const endIndex = Math.min(Math.floor(endFreq / 22050 * dataArray.length), dataArray.length - 1);
-        
-        let sum = 0;
-        for (let i = startIndex; i <= endIndex; i++) {
-          sum += dataArray[i];
-        }
-        
-        return sum / (endIndex - startIndex + 1);
-      };
-      
       const generateNote = (laneIndex: number, noteType: 'single' | 'hold' = 'single', duration: number=0) => {
         // activeNotes.value.push({
         //   id: noteId.value++,
@@ -280,6 +326,33 @@
           if (!note.hit) {
             note.position += 3; // Adjust speed as needed
 
+            // AUTOPLAY LOGIC
+            if (autoplay.value && !note.hit) {
+              // Check if note is at the hit line
+              if (Math.abs(note.position - hitLinePosition) <= hitThreshold) {
+                // Automatically hit the note
+                if (note.type === 'single') {
+                  note.hit = true;
+                  score.value += 100;
+                  generateHitSound(note.lane, note.type);
+                  
+                  // Visual feedback for autoplay
+                  lanes[note.lane].active = true;
+                  setTimeout(() => {
+                    lanes[note.lane].active = false;
+                  }, 100);
+                  
+                } else if (note.type === 'hold' && !note.isHolding) {
+                  note.isHolding = true;
+                  score.value += 50;
+                  generateHitSound(note.lane, note.type);
+                  
+                  // Keep lane active during hold
+                  lanes[note.lane].active = true;
+                }
+              }
+            }
+
             //hold note logic
             if (note.type === 'hold' && note.isHolding) {
               const noteEnd=note.position + (note.duration || 0);
@@ -305,6 +378,9 @@
         activeNotes.value = activeNotes.value.filter(note => {
           // If note passed the hit line by too much, remove it
           if (note.position > gameArea.value!.clientHeight && !note.hit) {
+            if (autoplay.value && note.type === 'hold' && note.isHolding) {
+              lanes[note.lane].active = false;
+            }
             return false;
           }
           return true;
@@ -480,7 +556,10 @@
         handleFileUpload,
         startGame,
         pauseGame,
-        resetGame
+        resetGame,
+        autoplay,
+        isLoadingBeatmap,
+        loadingProgress,
       };
     }
   });
@@ -635,5 +714,101 @@
   
   .reset-btn {
     background-color: #ff5555;
+  }
+
+  .autoplay-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .autoplay-toggle label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+
+  .autoplay-toggle input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+  }
+
+  .autoplay-toggle input[type="checkbox"]:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  .loading-section {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 400px;
+    text-align: center;
+  }
+
+  .loading-content {
+    max-width: 400px;
+    padding: 40px;
+    background-color: #2a2a2a;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  }
+
+  .loading-spinner {
+    width: 50px;
+    height: 50px;
+    border: 4px solid #333;
+    border-top: 4px solid #646cff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 20px;
+  }
+
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+
+  .loading-content h3 {
+    margin: 0 0 10px 0;
+    color: #fff;
+    font-size: 24px;
+  }
+
+  .loading-content p {
+    margin: 0 0 20px 0;
+    color: #ccc;
+    font-size: 14px;
+    word-break: break-all;
+  }
+
+  .loading-progress {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .progress-bar {
+    width: 100%;
+    height: 8px;
+    background-color: #333;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #646cff 0%, #8b5cf6 100%);
+    transition: width 0.3s ease;
+    border-radius: 4px;
+  }
+
+  .progress-text {
+    font-size: 12px;
+    color: #ccc;
+    font-weight: bold;
   }
   </style>
