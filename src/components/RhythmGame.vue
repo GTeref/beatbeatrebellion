@@ -27,6 +27,21 @@
       <div v-else-if="audioFile && !isLoadingBeatmap" class="game-section">
         <div class="game-header">
           <div class="score">Score: {{ score }}</div>
+
+          <div class="timing-controls">
+          <label>
+            Timing Offset: 
+            <input 
+              type="range" 
+              min="-1.0" 
+              max="1.0" 
+              step="0.01" 
+              v-model.number="audioLatencyOffset"
+              :disabled="isPlaying"
+            />
+            <span>{{ audioLatencyOffset.toFixed(2) }}s</span>
+          </label>
+        </div>
           <div class="autoplay-toggle">
             <label>
               <input 
@@ -89,6 +104,7 @@
       const audioContext = ref<AudioContext | null>(null);
       const audioBuffer = ref<AudioBuffer | null>(null);
       const audioSource = ref<AudioBufferSourceNode | null>(null);
+      const audioStartTime = ref(0);
       const analyser = ref<AnalyserNode | null>(null);
       const isPlaying = ref(false);
       const gameArea = ref<HTMLElement | null>(null);
@@ -102,6 +118,7 @@
       const autoplay = ref(false); // Autoplay toggle
       const isLoadingBeatmap = ref(false);
       const loadingProgress = ref(0); // Progress for beatmap generation
+      const audioLatencyOffset = ref(0); // Offset for audio latency
 
       interface Note {
         id: number;
@@ -206,6 +223,7 @@
         // Reset game state
         activeNotes.value = [];
         score.value = 0;
+        beatmapIndex.value = 0;
         
         // Create source node
         audioSource.value = audioContext.value.createBufferSource();
@@ -226,6 +244,8 @@
           audioSource.value.connect(audioContext.value.destination);
         }
         
+        audioStartTime.value = audioContext.value.currentTime;
+
         
         // Start audio
         audioSource.value.start(0);
@@ -233,7 +253,7 @@
         
         // Start game loop
         // lastNoteTime = Date.now();
-        lastBeatTime.value = audioContext.value.currentTime;
+        // lastBeatTime.value = audioContext.value.currentTime;
         gameLoop();
       };
       
@@ -266,19 +286,22 @@
         // Analyze audio and generate notes
         if (isPlaying.value && generatedBeatmap.value.length > 0) {
           // Calculate timing based on audio playback
-          const currentTime = audioContext.value?.currentTime || 0;
+          const currentTime = (audioContext.value!.currentTime - audioStartTime.value) + audioLatencyOffset.value;
           
           // Check if we should generate the next note
           while (beatmapIndex.value < generatedBeatmap.value.length) {
             const nextNote=generatedBeatmap.value[beatmapIndex.value];
 
-            const noteSpawnTime=nextNote.timestamp-3.0;
+            const leadTime=2.0;
+
+            const noteSpawnTime=nextNote.timestamp-leadTime;
 
             if (currentTime >= noteSpawnTime) {
 
               const duration=nextNote.note_type === 'hold' ? nextNote.duration*100 : 0;
               generateNote(nextNote.lane, nextNote.note_type, duration);
               beatmapIndex.value++;
+              console.log(`Spawning note at audio time: ${currentTime.toFixed(2)}s, note timestamp: ${nextNote.timestamp.toFixed(2)}s`);
             } else {
               break; // No more notes to generate at this time
             }
@@ -560,6 +583,8 @@
         autoplay,
         isLoadingBeatmap,
         loadingProgress,
+        audioStartTime,
+        audioLatencyOffset,
       };
     }
   });
@@ -810,5 +835,23 @@
     font-size: 12px;
     color: #ccc;
     font-weight: bold;
+  }
+
+  .timing-controls {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+  }
+
+  .timing-controls input[type="range"] {
+    width: 100px;
+    margin: 0 8px;
+  }
+
+  .timing-controls span {
+    font-family: monospace;
+    color: #ccc;
   }
   </style>
