@@ -24,8 +24,13 @@
       </div>
       
       <!-- Game section -->
-      <div v-else-if="audioFile && !isLoadingBeatmap" class="game-section">
+      <div v-else-if="selectedMusic" class="game-section">
         <div class="game-header">
+          <button @click="goBack" class="back-button">← Back to Library</button>
+          <div class="current-track">
+            <h3>{{ selectedMusic.file.title || selectedMusic.file.filename }}</h3>
+            <p>{{ selectedMusic.file.artist || 'Unknown Artist' }}</p>
+          </div>
           <div class="score">Score: {{ score }}</div>
 
           <div class="timing-controls">
@@ -99,7 +104,14 @@
   
   export default defineComponent({
     name: 'RhythmGame',
-    setup() {
+    props: {
+      selectedMusic: {
+        type: Object,
+        default: null
+      }
+    },
+    emits: ['navigate'],
+    setup(props, { emit }) {
       const audioFile = ref<File | null>(null);
       const audioContext = ref<AudioContext | null>(null);
       const audioBuffer = ref<AudioBuffer | null>(null);
@@ -138,6 +150,13 @@
         { key: 'k', active: false },
         { key: 'l', active: false }
       ]);
+
+      const goBack=()=>{
+        if (isPlaying.value) {
+          pauseGame();
+        }
+        emit('navigate', 'play');
+      }
       
       // Animation frame ID for game loop
       let animationFrameId: number;
@@ -153,7 +172,7 @@
       };
       
       const loadAudio = async () => {
-        if (!audioFile.value) return;
+        if (!props.selectedMusic) return;
 
         try {
 
@@ -168,7 +187,8 @@
           loadingProgress.value = 10;
           
           // Read file as ArrayBuffer
-          const arrayBuffer = await audioFile.value.arrayBuffer();
+          const audioBytes=new Uint8Array(props.selectedMusic.audioData);
+          const arrayBuffer = audioBytes.buffer;
           loadingProgress.value = 20;
 
           const dupArrayBuffer=arrayBuffer.slice(0);
@@ -178,10 +198,9 @@
           audioBuffer.value = await audioContext.value.decodeAudioData(dupArrayBuffer);
           loadingProgress.value = 40;
 
-          const audioBytes=new Uint8Array(arrayBuffer);
           loadingProgress.value = 50;
 
-          console.log(`Generating beatmap for audio file: ${audioFile.value.name}`);
+          console.log(`Generating beatmap for audio file: ${props.selectedMusic.value.name}`);
 
           const progressInterval = setInterval(() => {
             if (loadingProgress.value < 90) {
@@ -190,7 +209,7 @@
           }, 200);
 
           const beatmapPromise=await invoke<number[][]>('analyze_audio', {
-            audioData: Array.from(audioBytes)
+            audioData: props.selectedMusic.audioData
           });
 
           const beatmap=await beatmapPromise;
@@ -557,6 +576,9 @@
       onMounted(() => {
         window.addEventListener('keydown', handleKeyDown);
         window.addEventListener('keyup', handleKeyUp);
+        if (props.selectedMusic) {
+          loadAudio();
+        }
       });
       
       onBeforeUnmount(() => {
@@ -588,6 +610,7 @@
         loadingProgress,
         audioStartTime,
         audioLatencyOffset,
+        goBack,
       };
     }
   });

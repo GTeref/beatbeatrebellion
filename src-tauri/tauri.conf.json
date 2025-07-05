@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "beatbeatrebellion",
-        "width": 800,
-        "height": 600,
+        "width": 1920,
+        "height": 1080,
         "devtools": true
       }
     ],
@@ -22,20 +22,7 @@
       "csp": null
     }
   },
-  "plugins": {
-    "fs": {
-      "scope": {
-        "allow": ["**/*.mp3", "**/*.wav", "**/*.ogg", "**/*.flac", "$HOME/Music/**", "$DOCUMENTS/**", "**/*.m4a"],
-        "requireLiteralLeadingDot": false
-      },
-      "readFile": true,
-      "readDir": true
-    },
-    "dialog": {
-      "open": true,
-      "save": false
-    }
-  },
+  
   "bundle": {
     "active": true,
     "targets": "all",
