@@ -343,11 +343,14 @@
         
         const hitLinePosition = gameArea.value.clientHeight - 100;
         const hitThreshold = 30; // Acceptable range to hit a note
+
+        const leadTime = 2.0; // make this global later, same number as in gameLoop
+        const noteSpeed = hitLinePosition / (leadTime * 60); // Speed at which notes move down
         
         // Move notes down
         activeNotes.value.forEach(note => {
           if (!note.hit) {
-            note.position += 3; // Adjust speed as needed
+            note.position += noteSpeed; // Adjust speed as needed
 
             // AUTOPLAY LOGIC
             if (autoplay.value && !note.hit) {
