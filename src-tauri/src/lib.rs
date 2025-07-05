@@ -2,12 +2,109 @@
 use rodio::{Decoder, Source};
 use spectrum_analyzer::{samples_fft_to_spectrum, FrequencyLimit};
 use std::io::Cursor;
+use std::path::Path;
 use serde::{Deserialize, Serialize};
+use walkdir::WalkDir;
+use lofty::probe::Probe;
+use lofty::prelude::*;
 
 // #[tauri::command]
 // fn greet(name: &str) -> String {
 //     format!("Hello, {}! You've been greeted from Rust!", name)
 // }
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MusicFile{
+    pub path: String,
+    pub filename: String,
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub duration: Option<f64>, // in seconds
+    pub file_size: u64,
+    // to add: bpm, album art
+}
+
+#[tauri::command]
+fn scan_music_folder(folder_path:String)->Result<Vec<MusicFile>, String> {
+    let mut music_files: Vec<MusicFile> = Vec::new();
+
+    let audio_exts=vec![
+        "mp3", "wav", "ogg", "flac", "m4a", // add more formats as needed
+    ];
+
+    for entry in WalkDir::new(folder_path).into_iter().filter_map(Result::ok) {
+        let path= entry.path();
+        if path.is_file() {
+            if let Some(ext) = path.extension(){
+                if let Some(ext_str)=ext.to_str(){
+                    if audio_exts.contains(&ext_str.to_lowercase().as_str()){
+                        match extract_metadata(path){
+                            Ok(music_file) => {
+                                music_files.push(music_file);
+                            },
+                            Err(e)=>{
+                                eprintln!("Error extracting metadata for {}: {}", path.display(), e);
+                                // Still add the file without metadata
+                                music_files.push(MusicFile {
+                                    path: path.to_string_lossy().to_string(),
+                                    filename: path.file_name()
+                                        .unwrap_or_default()
+                                        .to_string_lossy()
+                                        .to_string(),
+                                    title: None,
+                                    artist: None,
+                                    album: None,
+                                    duration: None,
+                                    file_size: entry.metadata().map(|m| m.len()).unwrap_or(0),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    //sort by filename
+    music_files.sort_by(|a, b| a.filename.cmp(&b.filename));
+
+    Ok(music_files)
+}
+
+fn extract_metadata(path:&Path)->Result<MusicFile,String>{
+    let tagged_file=Probe::open(path)
+        .map_err(|e| format!("Error probing file: {}", e))?
+        .read()
+        .map_err(|e| format!("Error reading file: {}", e))?;
+
+    let props= tagged_file.properties();
+    let tag=tagged_file.primary_tag();
+
+    let music_file=MusicFile {
+        path: path.to_string_lossy().to_string(),
+        filename: path.file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string(),
+        title: tag.and_then(|t| t.title().map(|s| s.to_string())),
+        artist: tag.and_then(|t| t.artist().map(|s| s.to_string())),
+        album: tag.and_then(|t| t.album().map(|s| s.to_string())),
+        duration: Some(props.duration().as_secs_f64()),
+        file_size: std::fs::metadata(path)
+            .map(|m| m.len())
+            .unwrap_or(0),
+    };
+
+    Ok(music_file)
+
+
+}
+
+#[tauri::command]
+fn load_music_file(file_path: String) -> Result<Vec<u8>, String> { //ideally this would return Result<MusicFile, String> but we'll deal with that later
+    std::fs::read(&file_path)
+        .map_err(|e| format!("Failed to read file: {}", e))
+}
 
 #[derive(Serialize, Deserialize)]
 struct BeatmapNote{
@@ -254,11 +351,17 @@ fn balance_lanes(mut beatmap: Vec<BeatmapNote>)->Vec<BeatmapNote> {
 }
 
 
+
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![analyze_audio])
+        .invoke_handler(tauri::generate_handler![
+            analyze_audio,
+            scan_music_folder,
+            load_music_file,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

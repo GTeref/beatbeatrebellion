@@ -25,14 +25,15 @@
   "plugins": {
     "fs": {
       "scope": {
-        "allow": ["**/*.mp3", "**/*.wav", "**/*.ogg", "**/*.flac"],
+        "allow": ["**/*.mp3", "**/*.wav", "**/*.ogg", "**/*.flac", "$HOME/Music/**", "$DOCUMENTS/**", "**/*.m4a"],
         "requireLiteralLeadingDot": false
       },
       "readFile": true,
       "readDir": true
     },
     "dialog": {
-      "open": true
+      "open": true,
+      "save": false
     }
   },
   "bundle": {
