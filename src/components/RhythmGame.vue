@@ -2,10 +2,10 @@
 <template>
     <div class="game-container">
       <!-- File upload section -->
-      <div v-if="!audioFile" class="upload-section">
+      <div v-if="!selectedMusic" class="upload-section">
         <h2>BeatBeatRebellion</h2>
-        <p>Upload a music file to start playing!</p>
-        <input type="file" accept="audio/*" @change="handleFileUpload" />
+        <p>No music selected. Please go back to the library and select a track.</p>
+        <button @click="goBack" class="back-button">← Back to Library</button>
       </div>
 
       <!--loading screen-->
@@ -13,7 +13,7 @@
         <div class="loading-content">
           <div class="loading-spinner"></div>
           <h3>Analyzing Audio...</h3>
-          <p>Generating beatmap for: {{ audioFile?.name }}</p>
+          <p>Generating beatmap for: {{ selectedMusic.file.title || selectedMusic.file.filename }}</p>
           <div class="loading-progress">
             <div class="progress-bar">
               <div class="progress-fill" :style="{ width: `${loadingProgress}%` }"></div>
@@ -24,7 +24,7 @@
       </div>
       
       <!-- Game section -->
-      <div v-else-if="selectedMusic" class="game-section">
+      <div v-else class="game-section">
         <div class="game-header">
           <button @click="goBack" class="back-button">← Back to Library</button>
           <div class="current-track">
@@ -200,7 +200,7 @@
 
           loadingProgress.value = 50;
 
-          console.log(`Generating beatmap for audio file: ${props.selectedMusic.value.name}`);
+          console.log(`Generating beatmap for audio file: ${props.selectedMusic.file.filename}`);
 
           const progressInterval = setInterval(() => {
             if (loadingProgress.value < 90) {
@@ -226,6 +226,7 @@
           console.error('Error generating beatmap:', error);
           // generatedBeatmap.value = [];
         } finally {
+          await new Promise(resolve => setTimeout(resolve, 500)); // Wait for UI to update
           isLoadingBeatmap.value = false;
           loadingProgress.value = 0;
         }
@@ -288,12 +289,14 @@
         if (isPlaying.value) {
           pauseGame();
         }
-        audioFile.value = null;
+        // audioFile.value = null;
         audioBuffer.value = null;
         activeNotes.value = [];
         score.value = 0;
         isLoadingBeatmap.value = false;
         loadingProgress.value = 0;
+        beatmapIndex.value = 0;
+        generatedBeatmap.value = [];
       };
       
       const gameLoop = () => {

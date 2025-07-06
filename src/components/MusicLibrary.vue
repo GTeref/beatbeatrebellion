@@ -88,7 +88,7 @@
   
   interface MusicFile {
     path: string;
-    filename: string;
+    filename: string;whern 
     title?: string;
     artist?: string;
     album?: string;
