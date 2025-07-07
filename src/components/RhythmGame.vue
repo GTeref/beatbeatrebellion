@@ -132,6 +132,10 @@
       const loadingProgress = ref(0); // Progress for beatmap generation
       const audioLatencyOffset = ref(0); // Offset for audio latency
 
+      const detectedLatency = ref(0);
+      const calibrationBeeps = ref(0);
+      const isCalibrating = ref(false);
+
       interface Note {
         id: number;
         lane: number;
@@ -163,6 +167,95 @@
       let animationFrameId: number;
       // Timestamp for controlling note generation
       let lastNoteTime = 0;
+
+      const detectLatency = async () => {
+        if (!audioContext.value) return;
+        
+        isCalibrating.value = true;
+        calibrationBeeps.value = 0;
+        
+        try {
+          const measurements: number[] = [];
+          
+          // Create a series of beeps and measure the delay
+          for (let i = 0; i < 5; i++) {
+            await new Promise(resolve => setTimeout(resolve, 800)); // Wait between beeps
+            
+            calibrationBeeps.value = i + 1;
+            
+            // Measure the time when we schedule the beep
+            const scheduleTime = audioContext.value!.currentTime;
+            const performanceTime = performance.now() / 1000;
+            
+            // Create a short beep
+            const oscillator = audioContext.value!.createOscillator();
+            const gainNode = audioContext.value!.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.value!.destination);
+            
+            oscillator.frequency.setValueAtTime(800 + (i * 100), scheduleTime);
+            gainNode.gain.setValueAtTime(0, scheduleTime);
+            gainNode.gain.linearRampToValueAtTime(0.2, scheduleTime + 0.01);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, scheduleTime + 0.15);
+            
+            oscillator.start(scheduleTime);
+            oscillator.stop(scheduleTime + 0.15);
+            
+            // Calculate the difference between performance time and audio time
+            const latency = performanceTime - scheduleTime;
+            measurements.push(latency);
+            
+            console.log(`Beep ${i + 1}: Performance time: ${performanceTime.toFixed(3)}s, Audio time: ${scheduleTime.toFixed(3)}s, Difference: ${latency.toFixed(3)}s`);
+          }
+          
+          // Calculate average latency and add some buffer
+          const avgLatency = measurements.reduce((sum, lat) => sum + lat, 0) / measurements.length;
+          const bufferedLatency = avgLatency + 0.3; // Add 300ms buffer for processing
+          
+          detectedLatency.value = bufferedLatency;
+          audioLatencyOffset.value = Math.max(0, bufferedLatency); // Ensure non-negative
+          
+          console.log(`Detected average latency: ${avgLatency.toFixed(3)}s`);
+          console.log(`Set timing offset to: ${audioLatencyOffset.value.toFixed(3)}s`);
+          
+        } catch (error) {
+          console.error('Error during latency detection:', error);
+        } finally {
+          isCalibrating.value = false;
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      };
+
+      // Add system latency detection
+      const detectSystemLatency = () => {
+        if (!audioContext.value) return;
+        
+        // Measure AudioContext latency
+        const baseLatency = audioContext.value.baseLatency || 0;
+        const outputLatency = audioContext.value.outputLatency || 0;
+        
+        console.log(`AudioContext base latency: ${baseLatency.toFixed(3)}s`);
+        console.log(`AudioContext output latency: ${outputLatency.toFixed(3)}s`);
+        
+        // Calculate total system latency with buffer
+        const systemLatency = baseLatency + outputLatency;
+        const totalLatency = systemLatency + 0.5; // Add 500ms buffer for high-latency systems
+        
+        if (totalLatency > 0) {
+          detectedLatency.value = totalLatency;
+          audioLatencyOffset.value = totalLatency;
+          console.log(`Set initial offset to: ${totalLatency.toFixed(3)}s`);
+        }
+      };
+
+      // Add quick preset function for values above 1.0s
+      const useHighLatencyPreset = () => {
+        const presets = [1.0, 1.2, 1.5, 1.8, 2.0];
+        const randomPreset = presets[Math.floor(Math.random() * presets.length)];
+        audioLatencyOffset.value = randomPreset;
+        console.log(`Set high-latency preset: ${randomPreset}s`);
+      };
       
       const handleFileUpload = async (event: Event) => {
         const input = event.target as HTMLInputElement;
@@ -185,6 +278,7 @@
 
           // Create audio context
           audioContext.value = new (window.AudioContext || (window as any).webkitAudioContext)();
+          detectSystemLatency();
           loadingProgress.value = 10;
           
           // Read file as ArrayBuffer
@@ -625,6 +719,9 @@
         audioStartTime,
         audioLatencyOffset,
         goBack,
+        detectLatency,
+        detectSystemLatency,
+        useHighLatencyPreset,
       };
     }
   });
