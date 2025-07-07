@@ -141,6 +141,7 @@
         duration?: number; // For hold notes
         holdProgress?: number; // For hold notes
         isHolding?: boolean; // For hold notes
+        spawnTime?: number; // Time when the note was spawned
       }
       
       // Define lanes (A, S, K, L keys)
@@ -345,6 +346,7 @@
         //   position: 0,
         //   hit: false
         // });
+        const currentTime = (audioContext.value!.currentTime - audioStartTime.value) + audioLatencyOffset.value;
         const note: Note = {
           id: noteId.value++,
           lane: laneIndex,
@@ -353,7 +355,8 @@
           type: noteType,
           duration: noteType === 'hold' ? duration : 0,
           holdProgress: 0,
-          isHolding: false
+          isHolding: false,
+          spawnTime: currentTime // Store the time when the note was spawned
         };
 
         activeNotes.value.push(note);
@@ -368,11 +371,18 @@
 
         const leadTime = 2.0; // make this global later, same number as in gameLoop
         const noteSpeed = hitLinePosition / (leadTime * 60); // Speed at which notes move down
+
+        const currentTime = (audioContext.value!.currentTime - audioStartTime.value) + audioLatencyOffset.value;
         
         // Move notes down
         activeNotes.value.forEach(note => {
           if (!note.hit) {
-            note.position += noteSpeed; // Adjust speed as needed
+
+            // change from frame-based to time-based positioning
+
+            const timeUnitHit=note.spawnTime + leadTime - currentTime;
+            const progress = 1 - (timeUnitHit / leadTime);
+            note.position = progress * hitLinePosition;
 
             // AUTOPLAY LOGIC
             if (autoplay.value && !note.hit) {
@@ -425,7 +435,8 @@
         // Remove notes that went too far
         activeNotes.value = activeNotes.value.filter(note => {
           // If note passed the hit line by too much, remove it
-          if (note.position > gameArea.value!.clientHeight && !note.hit) {
+          const timeUntilHit = note.spawnTime + leadTime - currentTime;
+          if (timeUntilHit < -1.0 && !note.hit) {
             if (autoplay.value && note.type === 'hold' && note.isHolding) {
               lanes[note.lane].active = false;
             }
